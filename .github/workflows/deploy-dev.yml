@@ -1,0 +1,63 @@
+name: Build and Deploy Frontend to Dev Lightsail
+
+on:
+  push:
+    branches: [development]
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Cleanup old artifacts
+        run: |
+          rm -f frontend.tar
+          sudo chown -R $USER:$USER .
+          chmod -R u+rwX .
+      - name: Build Docker image
+        run: docker build -t frontend:latest .
+
+      - name: Save Docker image to tar
+        run: |
+          docker save frontend:latest -o frontend.tar
+          ls -lah frontend.tar
+      - name: Fix tar permissions
+        run: |
+          sudo chown $USER:$USER frontend.tar
+          chmod 644 frontend.tar
+          ls -lah frontend.tar
+      - name: Debug frontend.tar
+        run: |
+          echo "Current user:"
+          whoami
+          echo "Current directory:"
+          pwd
+          echo "Listing files:"
+          ls -lah
+          echo "File details:"
+          stat frontend.tar || echo "frontend.tar not found"
+      - name: Copy files to Lightsail
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.LIGHTSAIL_DEV_HOST }}
+          username: ${{ secrets.LIGHTSAIL_USER }}
+          key: ${{ secrets.LIGHTSAIL_DEV_SSH_KEY }}
+          source: frontend.tar,docker-compose.prod.yml
+          target: /home/ubuntu/pinevox
+          overwrite: true
+
+      - name: Deploy on Lightsail via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.LIGHTSAIL_DEV_HOST }}
+          username: ${{ secrets.LIGHTSAIL_USER }}
+          key: ${{ secrets.LIGHTSAIL_DEV_SSH_KEY }}
+          script: |
+            cd /home/ubuntu/pinevox
+            docker load -i frontend.tar
+            docker compose -f docker-compose.prod.yml up -d --force-recreate
+            # clean unused
+            docker image prune -af
